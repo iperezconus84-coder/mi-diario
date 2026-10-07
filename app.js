@@ -30,7 +30,7 @@
     catch (e) { toast('No pude guardar en este dispositivo (¿sin espacio?).'); }
   }
   function loadSettings() {
-    const def = { owner: '', repo: '', path: 'diario.json', tokenBox: null, lastSync: 0, autolock: 5, reminder: '21:30' };
+    const def = { owner: '', repo: '', path: 'diario.json', tokenBox: null, lastSync: 0, autolock: 5, reminder: '21:30', notionUrl: '' };
     try { return Object.assign(def, JSON.parse(localStorage.getItem(LS_SET)) || {}); } catch (e) { return def; }
   }
   function saveSettings() { try { localStorage.setItem(LS_SET, JSON.stringify(settings)); } catch (e) {} }
@@ -454,6 +454,7 @@
     $('#set-token').placeholder = settings.tokenBox ? 'Guardado 🔐 (déjalo vacío para mantenerlo)' : 'github_pat_…';
     $('#autolock').value = String(settings.autolock);
     $('#reminder-time').value = settings.reminder || '21:30';
+    $('#notion-url').value = settings.notionUrl || '';
     $('#sync-info').textContent = syncConfigured()
       ? (settings.lastSync ? 'Última sincronización: ' + new Date(settings.lastSync).toLocaleString('es-CL') : 'Aún sin sincronizar.')
       : 'Sin configurar: el diario solo vive en este dispositivo.';
@@ -471,6 +472,41 @@
     if (!syncConfigured()) { toast('Primero configura la sincronización.'); return; }
     await flushSave(); await syncNow(false);
   }));
+  $('#notion-url').addEventListener('change', (ev) => { settings.notionUrl = ev.target.value.trim(); saveSettings(); });
+
+  /* ---------- Enviar a Ideas de Notion ---------- */
+  let lastSel = { start: 0, end: 0 };
+  const ta = $('#entry-text');
+  const rememberSel = () => { lastSel = { start: ta.selectionStart, end: ta.selectionEnd }; };
+  ['select', 'keyup', 'mouseup', 'touchend', 'blur'].forEach((t) => ta.addEventListener(t, rememberSel));
+  document.addEventListener('selectionchange', () => { if (document.activeElement === ta) rememberSel(); });
+  ta.addEventListener('input', () => { lastSel = { start: 0, end: 0 }; });
+
+  function ideaPayload() {
+    const full = ta.value;
+    const sel = lastSel.end > lastSel.start ? full.slice(lastSel.start, lastSel.end).trim() : '';
+    const body = sel || full.trim();
+    if (!body) return null;
+    const firstLine = body.split('\n').find((l) => l.trim()) || body;
+    const title = firstLine.length > 70 ? firstLine.slice(0, 67).trim() + '…' : firstLine.trim();
+    const text = body + '\n\n— Desde mi diario, ' + fmtLong(current);
+    return { title, text };
+  }
+  $('#btn-to-notion').addEventListener('click', async () => {
+    const p = ideaPayload();
+    if (!p) { toast('Escribe o selecciona algo primero.'); return; }
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+    if (isMobile && navigator.share) {
+      try { await navigator.share({ title: p.title, text: p.text }); return; }
+      catch (e) { if (e.name === 'AbortError') return; /* si falla, se usa el plan B */ }
+    }
+    let copied = false;
+    try { await navigator.clipboard.writeText(p.text); copied = true; } catch (e) {}
+    if (settings.notionUrl) window.open(settings.notionUrl, '_blank', 'noopener');
+    if (copied) toast(settings.notionUrl ? 'Copiado ✓ Pégalo como nueva idea en Notion.' : 'Copiado ✓ Agrega el enlace de tu base en Ajustes para abrirla directo.', 4500);
+    else toast('No pude copiar el texto. Selecciónalo y cópialo a mano.', 4500);
+  });
+
   $('#autolock').addEventListener('change', (ev) => { settings.autolock = +ev.target.value; saveSettings(); });
   $('#btn-reminder').addEventListener('click', () => {
     settings.reminder = $('#reminder-time').value || '21:30'; saveSettings();

@@ -1,5 +1,5 @@
 /* Mi Diario — funciona sin conexión. Solo guarda los archivos de la app, nunca tus entradas. */
-const CACHE = 'mi-diario-v1';
+const CACHE = 'mi-diario-v2';
 const SHELL = ['./', 'index.html', 'styles.css', 'core.js', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 

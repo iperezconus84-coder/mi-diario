@@ -117,6 +117,9 @@
 
       <textarea id="entry-text" class="paper" placeholder="Querido diario… Escribe como le hablarías a alguien de confianza. Tres líneas bastan."></textarea>
 
+      <button class="btn idea-btn" id="btn-to-notion" type="button">💡 Enviar a Ideas de Notion</button>
+      <p class="muted small idea-hint">Selecciona un trozo del texto para enviar solo esa parte; si no seleccionas nada, se envía la entrada completa.</p>
+
       <div class="gratitude">
         <div class="section-label">🙏 Hoy agradezco</div>
         <input class="grat" data-i="0" placeholder="Algo o alguien…">
@@ -181,6 +184,15 @@
           <input type="time" id="reminder-time" value="21:30" aria-label="Hora del recordatorio">
           <button class="btn" id="btn-reminder">Agregar a mi calendario</button>
         </div>
+      </div>
+
+      <div class="card stack">
+        <h3>💡 Ideas de Notion</h3>
+        <p class="muted small">En el celular, el botón abre el menú Compartir: elige <b>Notion</b> y luego <b>Ideas sueltas</b>. En el computador, se copia el texto y se abre este enlace para que lo pegues.</p>
+        <label>Enlace de tu base "Ideas sueltas"
+          <input id="notion-url" type="url" autocapitalize="off" spellcheck="false" placeholder="https://www.notion.so/…">
+        </label>
+        <p class="muted small">Lo que envíes a Notion deja de estar cifrado: comparte solo ideas, no lo íntimo.</p>
       </div>
 
       <div class="card stack">
