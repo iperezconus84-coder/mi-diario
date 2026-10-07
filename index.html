@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mi Diario</title>
+  <meta name="description" content="Diario personal cifrado con contraseña">
+  <meta name="theme-color" content="#F6F1E9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1C1A18" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Diario">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ========== Bienvenida / crear diario ========== -->
+<section id="screen-setup" class="screen center" hidden>
+  <div class="card narrow">
+    <div class="logo">✍️</div>
+    <h1>Mi Diario</h1>
+    <p class="muted">Un lugar privado para escribir tu vida. Todo se cifra en tu dispositivo con tu contraseña: nadie más puede leerlo.</p>
+
+    <div class="tabs-inline" role="tablist">
+      <button class="pill active" data-setup="new" role="tab">Empezar un diario</button>
+      <button class="pill" data-setup="join" role="tab">Ya tengo un diario</button>
+    </div>
+
+    <form id="form-new" class="stack">
+      <label>Crea tu contraseña
+        <input type="password" id="new-pass" autocomplete="new-password" minlength="8" required placeholder="Mínimo 8 caracteres">
+      </label>
+      <label>Repite la contraseña
+        <input type="password" id="new-pass2" autocomplete="new-password" minlength="8" required>
+      </label>
+      <p class="warn">⚠️ Si olvidas esta contraseña, nadie podrá recuperar tu diario (ni siquiera tú). Anótala en un lugar seguro.</p>
+      <button class="btn primary" type="submit">Crear mi diario</button>
+    </form>
+
+    <form id="form-join" class="stack" hidden>
+      <p class="muted small">Para abrir en este dispositivo el diario que ya escribes en otro, usa los mismos datos de sincronización.</p>
+      <label>Usuario de GitHub
+        <input id="join-owner" autocapitalize="off" autocorrect="off" spellcheck="false" required placeholder="tu-usuario">
+      </label>
+      <label>Repositorio privado de datos
+        <input id="join-repo" autocapitalize="off" autocorrect="off" spellcheck="false" required value="mi-diario-datos">
+      </label>
+      <label>Token de acceso
+        <input type="password" id="join-token" autocomplete="off" required placeholder="github_pat_…">
+      </label>
+      <label>Contraseña del diario
+        <input type="password" id="join-pass" autocomplete="current-password" required>
+      </label>
+      <button class="btn primary" type="submit">Abrir mi diario</button>
+    </form>
+    <p class="error" id="setup-error" role="alert"></p>
+    <label class="link-btn restore-link">¿Tienes un respaldo cifrado? Restaurarlo
+      <input type="file" id="setup-import" accept=".json,application/json" hidden>
+    </label>
+  </div>
+</section>
+
+<!-- ========== Bloqueo ========== -->
+<section id="screen-lock" class="screen center" hidden>
+  <form id="form-unlock" class="card narrow stack">
+    <div class="logo">🔒</div>
+    <h1>Mi Diario</h1>
+    <p class="muted" id="lock-greeting">Escribe tu contraseña para abrirlo.</p>
+    <input type="password" id="unlock-pass" autocomplete="current-password" required placeholder="Contraseña" aria-label="Contraseña">
+    <button class="btn primary" type="submit">Abrir</button>
+    <p class="error" id="unlock-error" role="alert"></p>
+  </form>
+</section>
+
+<!-- ========== App ========== -->
+<div id="screen-app" class="screen" hidden>
+  <header class="topbar">
+    <span class="brand">Mi Diario</span>
+    <span class="sync" id="sync-status" title="Estado de sincronización"></span>
+    <button class="icon-btn" id="btn-lock" title="Bloquear" aria-label="Bloquear">🔒</button>
+  </header>
+
+  <main>
+    <!-- Escribir -->
+    <section id="view-write" class="view">
+      <div class="date-row">
+        <button class="icon-btn" id="day-prev" aria-label="Día anterior">‹</button>
+        <label class="date-label">
+          <span id="day-title"></span>
+          <input type="date" id="day-input" aria-label="Elegir fecha">
+        </label>
+        <button class="icon-btn" id="day-next" aria-label="Día siguiente">›</button>
+      </div>
+
+      <div class="prompt-card">
+        <div class="prompt-label">Pregunta del día</div>
+        <p id="prompt-text"></p>
+        <div class="prompt-actions">
+          <button class="link-btn" id="prompt-other">Otra pregunta ↻</button>
+        </div>
+      </div>
+
+      <div class="mood" role="radiogroup" aria-label="¿Cómo te sentiste?">
+        <span class="mood-label">¿Cómo te sentiste?</span>
+        <div class="mood-options">
+          <button data-mood="1" title="Muy difícil">😣</button>
+          <button data-mood="2" title="Difícil">😔</button>
+          <button data-mood="3" title="Normal">😐</button>
+          <button data-mood="4" title="Bien">🙂</button>
+          <button data-mood="5" title="Muy bien">😄</button>
+        </div>
+      </div>
+
+      <textarea id="entry-text" class="paper" placeholder="Querido diario… Escribe como le hablarías a alguien de confianza. Tres líneas bastan."></textarea>
+
+      <div class="gratitude">
+        <div class="section-label">🙏 Hoy agradezco</div>
+        <input class="grat" data-i="0" placeholder="Algo o alguien…">
+        <input class="grat" data-i="1" placeholder="Otra cosa…">
+        <input class="grat" data-i="2" placeholder="Una más…">
+      </div>
+
+      <div class="entry-footer">
+        <span class="muted small" id="save-status"></span>
+        <button class="link-btn danger" id="entry-delete" hidden>Borrar esta entrada</button>
+      </div>
+
+      <div id="on-this-day" class="memory" hidden></div>
+    </section>
+
+    <!-- Calendario -->
+    <section id="view-calendar" class="view" hidden>
+      <div class="month-row">
+        <button class="icon-btn" id="month-prev" aria-label="Mes anterior">‹</button>
+        <h2 id="month-title"></h2>
+        <button class="icon-btn" id="month-next" aria-label="Mes siguiente">›</button>
+      </div>
+      <div class="cal-head"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+      <div class="cal-grid" id="cal-grid"></div>
+
+      <input type="search" id="search" class="search" placeholder="🔎 Buscar en tu diario…">
+      <div id="entry-list" class="entry-list"></div>
+    </section>
+
+    <!-- Ánimo -->
+    <section id="view-mood" class="view" hidden>
+      <div class="stats">
+        <div class="stat"><b id="st-streak">0</b><span>días seguidos</span></div>
+        <div class="stat"><b id="st-total">0</b><span>entradas</span></div>
+        <div class="stat"><b id="st-avg">–</b><span>ánimo (30 días)</span></div>
+      </div>
+      <h3>Tu ánimo, últimos 30 días</h3>
+      <div id="mood-chart" class="chart"></div>
+      <h3>Agradecimientos recientes</h3>
+      <ul id="grat-list" class="grat-list"></ul>
+    </section>
+
+    <!-- Ajustes -->
+    <section id="view-settings" class="view" hidden>
+      <div class="card stack">
+        <h3>☁️ Sincronización</h3>
+        <p class="muted small">Guarda una copia <b>cifrada</b> en tu repositorio privado de GitHub para usar el diario en el celular y el computador.</p>
+        <label>Usuario de GitHub <input id="set-owner" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="tu-usuario"></label>
+        <label>Repositorio privado <input id="set-repo" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="mi-diario-datos"></label>
+        <label>Token de acceso <input type="password" id="set-token" autocomplete="off" placeholder="Déjalo vacío para mantener el actual"></label>
+        <div class="row">
+          <button class="btn primary" id="btn-sync-save">Guardar y sincronizar</button>
+          <button class="btn" id="btn-sync-now">Sincronizar ahora</button>
+        </div>
+        <p class="muted small" id="sync-info"></p>
+      </div>
+
+      <div class="card stack">
+        <h3>⏰ Recordatorio diario</h3>
+        <p class="muted small">Descarga un evento que se repite cada día y ábrelo para agregarlo a tu calendario. Te avisará a la hora elegida.</p>
+        <div class="row">
+          <input type="time" id="reminder-time" value="21:30" aria-label="Hora del recordatorio">
+          <button class="btn" id="btn-reminder">Agregar a mi calendario</button>
+        </div>
+      </div>
+
+      <div class="card stack">
+        <h3>🔐 Seguridad</h3>
+        <label>Bloquear automáticamente después de
+          <select id="autolock">
+            <option value="1">1 minuto sin uso</option>
+            <option value="3">3 minutos sin uso</option>
+            <option value="5">5 minutos sin uso</option>
+            <option value="15">15 minutos sin uso</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="card stack">
+        <h3>💾 Respaldo</h3>
+        <div class="row wrap">
+          <button class="btn" id="btn-export-enc">Descargar respaldo cifrado</button>
+          <label class="btn file-btn">Restaurar respaldo<input type="file" id="import-file" accept=".json,application/json" hidden></label>
+          <button class="btn" id="btn-export-txt">Exportar como texto</button>
+        </div>
+        <p class="muted small">El respaldo cifrado solo se abre con tu contraseña. El texto exportado queda <b>sin cifrar</b>: guárdalo con cuidado.</p>
+      </div>
+
+      <div class="card stack">
+        <h3>⚠️ Este dispositivo</h3>
+        <button class="btn danger" id="btn-wipe">Quitar el diario de este dispositivo</button>
+        <p class="muted small">Borra la copia local. Si tienes sincronización, el diario sigue a salvo en GitHub.</p>
+      </div>
+      <p class="muted small center-text">Mi Diario · cifrado AES-256 en tu dispositivo</p>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-view="write" class="active"><span>✍️</span>Escribir</button>
+    <button data-view="calendar"><span>📅</span>Calendario</button>
+    <button data-view="mood"><span>🌤️</span>Ánimo</button>
+    <button data-view="settings"><span>⚙️</span>Ajustes</button>
+  </nav>
+</div>
+
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script src="core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
