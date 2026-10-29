@@ -27,6 +27,8 @@
     'No des consejos, no diagnostiques, no juzgues, no resumas ni repitas lo que escribió, no agregues saludos ni explicaciones.',
     'Escribe únicamente la pregunta.'
   ].join(' ');
+  // Versión corta para el modo procesador: menos texto que leer = respuesta mucho más rápida.
+  const SYSTEM_CPU = 'Eres un diario personal. Responde solo con UNA pregunta breve, cálida y abierta, en español, para que la persona profundice en lo que escribió. Sin consejos, sin saludos.';
 
   let engine = null, loading = null, loadedId = null;
   let cpu = null, cpuLoading = null;
@@ -64,6 +66,7 @@
         progressCallback: ({ loaded, total }) => { if (onProgress && total) onProgress(Math.min(99, Math.round((loaded / total) * 100)), ''); }
       });
       if (onProgress) onProgress(100, '');
+      try { root.DiarioAI.threads = w.isMultithread() ? (w.nbThreads || 'varios') : 1; } catch (e) {}
       return w;
     })();
     try { return await cpuLoading; }
@@ -136,10 +139,17 @@
     if (signal && signal.aborted) throw new DOMException('cancelado', 'AbortError');
     const isCPU = !!(eng && eng.cpu);
     if (onStage) onStage('pensando');
-    const recent = context.messages.slice(isCPU ? -4 : -8);
-    const convo = [{ role: 'system', content: SYSTEM }];
-    if (context.prompt) convo.push({ role: 'assistant', content: context.prompt });
-    recent.forEach((m) => convo.push({ role: m.from === 'ia' ? 'assistant' : 'user', content: m.text }));
+    if (isCPU && !mine.length) return { risk: false, text: '' };
+    let convo;
+    if (isCPU) {
+      const last = mine[mine.length - 1];
+      const t = last.text.length > 400 ? '…' + last.text.slice(-400) : last.text;
+      convo = [{ role: 'system', content: SYSTEM_CPU }, { role: 'user', content: t }];
+    } else {
+      convo = [{ role: 'system', content: SYSTEM }];
+      if (context.prompt) convo.push({ role: 'assistant', content: context.prompt });
+      context.messages.slice(-8).forEach((m) => convo.push({ role: m.from === 'ia' ? 'assistant' : 'user', content: m.text }));
+    }
     try {
       let out = '';
       const req = { messages: convo, temperature: 0.7, max_tokens: isCPU ? 60 : 90, stream: true };

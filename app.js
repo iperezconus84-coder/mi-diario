@@ -64,7 +64,21 @@
 
   /* ---------- Inicio ---------- */
   function boot() {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+      // La primera vez que el service worker toma el control, recargar una sola vez para
+      // activar el aislamiento que permite a la IA usar varios núcleos.
+      try {
+        if (!window.crossOriginIsolated && navigator.serviceWorker.controller && !sessionStorage.getItem('miDiario.coi')) {
+          sessionStorage.setItem('miDiario.coi', '1'); location.reload(); return;
+        }
+      } catch (e) {}
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        try {
+          if (!window.crossOriginIsolated && !sessionStorage.getItem('miDiario.coi')) { sessionStorage.setItem('miDiario.coi', '1'); location.reload(); }
+        } catch (e) {}
+      });
+    }
     vault = loadVault();
     if (vault) showLock(); else show('#screen-setup');
   }
@@ -737,7 +751,7 @@
     try {
       await AI.load(settings.aiModel, (pct) => { bar.firstElementChild.style.width = pct + '%'; st.textContent = 'Descargando y preparando… ' + pct + '%'; });
       bar.hidden = true;
-      st.textContent = 'Listo. El modelo quedó en este dispositivo.';
+      st.textContent = 'Listo. El modelo quedó en este dispositivo.' + (AI.threads ? ' Usa ' + AI.threads + (AI.threads === 1 ? ' núcleo.' : ' núcleos.') : '');
       if (!settings.aiOn) { settings.aiOn = true; saveSettings(); $('#ai-on').checked = true; }
       $('#ai-download').textContent = 'Probar que funciona';
     } catch (e) {
