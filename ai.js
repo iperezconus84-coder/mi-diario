@@ -60,7 +60,7 @@
     if (cpuLoading) return cpuLoading;
     cpuLoading = (async () => {
       await w.loadModelFromUrl(CPU_MODEL, {
-        n_ctx: 2048, n_gpu_layers: 0,
+        n_ctx: 1024, n_gpu_layers: 0,
         progressCallback: ({ loaded, total }) => { if (onProgress && total) onProgress(Math.min(99, Math.round((loaded / total) * 100)), ''); }
       });
       if (onProgress) onProgress(100, '');
@@ -127,23 +127,34 @@
   }
 
   // context: { prompt, messages: [{ from, text }] }  → devuelve la pregunta, o { risk: true, text }
-  async function ask(context, modelKey, onProgress, onToken) {
+  // onStage('cargando' | 'pensando'); signal: AbortSignal para cancelar
+  async function ask(context, modelKey, onProgress, onToken, onStage, signal) {
     const mine = context.messages.filter((m) => m.from !== 'ia');
     if (mine.slice(-3).some((m) => RISK.test(m.text))) return { risk: true, text: RISK_REPLY };
+    if (onStage) onStage('cargando');
     const eng = await load(modelKey, onProgress);
+    if (signal && signal.aborted) throw new DOMException('cancelado', 'AbortError');
     const isCPU = !!(eng && eng.cpu);
-    const recent = context.messages.slice(-8);
+    if (onStage) onStage('pensando');
+    const recent = context.messages.slice(isCPU ? -4 : -8);
     const convo = [{ role: 'system', content: SYSTEM }];
     if (context.prompt) convo.push({ role: 'assistant', content: context.prompt });
     recent.forEach((m) => convo.push({ role: m.from === 'ia' ? 'assistant' : 'user', content: m.text }));
     try {
       let out = '';
-      const req = { messages: convo, temperature: 0.7, max_tokens: 90, stream: true };
-      const stream = isCPU ? await eng.cpu.createChatCompletion(req) : await eng.chat.completions.create(req);
+      const req = { messages: convo, temperature: 0.7, max_tokens: isCPU ? 60 : 90, stream: true };
+      let stream;
+      if (isCPU) { if (signal) req.abortSignal = signal; stream = await eng.cpu.createChatCompletion(req); }
+      else {
+        if (signal) signal.addEventListener('abort', () => { try { eng.interruptGenerate(); } catch (e) {} }, { once: true });
+        stream = await eng.chat.completions.create(req);
+      }
       for await (const chunk of stream) {
         const d = chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content;
+        if (signal && signal.aborted) break;
         if (d) { out += d; if (onToken) onToken(out); }
       }
+      if (signal && signal.aborted) throw new DOMException('cancelado', 'AbortError');
       return { risk: false, text: clean(out) };
     } finally {
       if (!isCPU) { try { await eng.resetChat(); } catch (e) {} }

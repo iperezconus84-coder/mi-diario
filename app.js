@@ -198,7 +198,7 @@
   let currentPrompt = '';
   let msgs = [], mood = 0, grat = ['', '', ''];
   let editingId = null, openMsgId = null;
-  let asking = null;   // pregunta de seguimiento en curso: { day, pct, text }
+  let asking = null;   // pregunta de seguimiento en curso: { day, pct, text, stage, start, ctrl }
   const thread = $('#thread');
   const composer = $('#entry-text');
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -300,9 +300,13 @@
     if (asking && asking.day === current) {
       const t = bubble('them', 'thinking');
       t.id = 'ai-thinking';
-      t.appendChild(el('p', null, asking.text || (asking.pct != null && asking.pct < 100 ? 'Preparando la IA en tu celular…' : 'Pensando una pregunta…')));
+      t.appendChild(el('p', null, thinkingText()));
       if (asking.pct != null && asking.pct < 100) { const pr = el('div', 'progress'); const bar = el('span'); bar.style.width = asking.pct + '%'; pr.appendChild(bar); t.appendChild(pr); }
       thread.appendChild(t);
+      const row = el('div', 'chips them-chips');
+      const c = el('button', 'chip', 'Cancelar'); c.type = 'button'; c.id = 'ai-cancel';
+      c.addEventListener('click', () => { if (asking && asking.ctrl) asking.ctrl.abort(); });
+      row.appendChild(c); thread.appendChild(row);
     } else if (settings.aiOn && msgs.length && msgs[msgs.length - 1].from !== 'ia') {
       const row = el('div', 'chips me-chips');
       const c = el('button', 'chip ask', 'Pregúntame más');
@@ -407,16 +411,28 @@
     if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); send(); }
   });
 
+  function thinkingText() {
+    if (!asking) return '';
+    if (asking.text) return asking.text;
+    const secs = Math.round((Date.now() - asking.start) / 1000);
+    if (asking.pct != null && asking.pct < 100) return 'Descargando la IA… ' + asking.pct + '%';
+    if (asking.stage === 'cargando') return 'Cargando la IA en memoria… ' + secs + ' s';
+    return 'Pensando una pregunta… ' + secs + ' s';
+  }
+  const AI_LIMIT_MS = 3 * 60 * 1000;
   async function askMore() {
     if (asking) return;
     const day = current;
-    asking = { day, pct: null, text: '' };
+    const ctrl = new AbortController();
+    asking = { day, pct: null, text: '', stage: 'cargando', start: Date.now(), ctrl };
     renderThread(); scrollThread(true);
+    const tick = setInterval(() => update(), 1000);
+    let timedOut = false;
+    const limit = setTimeout(() => { if (asking && asking.stage === 'pensando' && !asking.text) { timedOut = true; ctrl.abort(); } }, AI_LIMIT_MS);
     const update = () => {
-      const t = $('#ai-thinking'); if (!t || current !== day) return;
+      const t = $('#ai-thinking'); if (!t || !asking || current !== day) return;
       const p = t.querySelector('p');
-      if (asking.text) p.textContent = asking.text;
-      else p.textContent = asking.pct != null && asking.pct < 100 ? 'Preparando la IA en tu celular… ' + asking.pct + '%' : 'Pensando una pregunta…';
+      p.textContent = thinkingText();
       let pr = t.querySelector('.progress');
       if (asking.pct != null && asking.pct < 100 && !asking.text) {
         if (!pr) { pr = el('div', 'progress'); pr.appendChild(el('span')); t.appendChild(pr); }
@@ -428,8 +444,11 @@
         { prompt: currentPrompt, messages: msgs.map((m) => ({ from: m.from, text: m.text })) },
         settings.aiModel,
         (pct) => { if (asking) { asking.pct = pct; update(); } },
-        (partial) => { if (asking) { asking.text = partial.replace(/\s+/g, ' ').trim(); update(); } }
+        (partial) => { if (asking) { asking.text = partial.replace(/\s+/g, ' ').trim(); update(); } },
+        (stage) => { if (asking) { asking.stage = stage; if (stage === 'pensando') asking.start = Date.now(); update(); } },
+        ctrl.signal
       );
+      clearInterval(tick); clearTimeout(limit);
       if (current !== day) return;
       let text = res.text;
       if (!text) text = C.promptFor(C.parseDayId(day), promptOffset + 1 + msgs.length);
@@ -440,9 +459,12 @@
       renderThread(); scrollThread(true);
       scheduleSave();
     } catch (e) {
+      clearInterval(tick); clearTimeout(limit);
       asking = null;
       if (current === day) renderThread();
-      toast(e.message || 'No pude hacer la pregunta.', 6000);
+      if (timedOut) toast('Tardó demasiado y la detuve. En modo procesador puede ser muy lento en este celular.', 7000);
+      else if (e && e.name === 'AbortError' || /abort|cancel/i.test(String(e && e.message))) toast('Pregunta cancelada.');
+      else toast(e.message || 'No pude hacer la pregunta.', 6000);
     }
   }
 
