@@ -256,7 +256,7 @@
       'DTSTART:' + ymd + 'T' + pad(hh) + pad(mm) + '00',
       'DURATION:PT10M',
       'RRULE:FREQ=DAILY',
-      'SUMMARY:✍️ Escribir mi diario',
+      'SUMMARY:Escribir mi diario',
       'DESCRIPTION:Unos minutos para ti. ' + (url || ''),
       url ? 'URL:' + url : '',
       'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:Hora de escribir tu diario', 'END:VALARM',
@@ -265,7 +265,7 @@
   }
 
   /* ---------- Exportar como texto ---------- */
-  const MOODS = { 5: '😄 Muy bien', 4: '🙂 Bien', 3: '😐 Normal', 2: '😔 Difícil', 1: '😣 Muy difícil' };
+  const MOODS = { 5: 'Muy bien', 4: 'Bien', 3: 'Normal', 2: 'Difícil', 1: 'Muy difícil' };
   function entriesToText(entries) {
     return Object.keys(entries).sort().map((id) => {
       const e = entries[id];

@@ -21,7 +21,7 @@
 <!-- ========== Bienvenida / crear diario ========== -->
 <section id="screen-setup" class="screen center" hidden>
   <div class="card narrow">
-    <div class="logo">✍️</div>
+    <div class="logo" aria-hidden="true"><span></span><span></span></div>
     <h1>Mi Diario</h1>
     <p class="muted">Un lugar privado para escribir tu vida. Todo se cifra en tu dispositivo con tu contraseña: nadie más puede leerlo.</p>
 
@@ -37,7 +37,7 @@
       <label>Repite la contraseña
         <input type="password" id="new-pass2" autocomplete="new-password" minlength="8" required>
       </label>
-      <p class="warn">⚠️ Si olvidas esta contraseña, nadie podrá recuperar tu diario (ni siquiera tú). Anótala en un lugar seguro.</p>
+      <p class="warn">Si olvidas esta contraseña, nadie podrá recuperar tu diario (ni siquiera tú). Anótala en un lugar seguro.</p>
       <button class="btn primary" type="submit">Crear mi diario</button>
     </form>
 
@@ -67,7 +67,7 @@
 <!-- ========== Bloqueo ========== -->
 <section id="screen-lock" class="screen center" hidden>
   <form id="form-unlock" class="card narrow stack">
-    <div class="logo">🔒</div>
+    <div class="logo" aria-hidden="true"><span></span><span></span></div>
     <h1>Mi Diario</h1>
     <p class="muted" id="lock-greeting">Escribe tu contraseña para abrirlo.</p>
     <input type="password" id="unlock-pass" autocomplete="current-password" required placeholder="Contraseña" aria-label="Contraseña">
@@ -81,11 +81,11 @@
   <header class="topbar">
     <span class="brand">Mi Diario</span>
     <span class="sync" id="sync-status" title="Estado de sincronización"></span>
-    <button class="icon-btn" id="btn-lock" title="Bloquear" aria-label="Bloquear">🔒</button>
+    <button class="icon-btn" id="btn-lock" title="Bloquear" aria-label="Bloquear"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
   </header>
 
   <main>
-    <!-- Escribir -->
+    <!-- Escribir (conversación) -->
     <section id="view-write" class="view">
       <div class="date-row">
         <button class="icon-btn" id="day-prev" aria-label="Día anterior">‹</button>
@@ -96,43 +96,12 @@
         <button class="icon-btn" id="day-next" aria-label="Día siguiente">›</button>
       </div>
 
-      <div class="prompt-card">
-        <div class="prompt-label">Pregunta del día</div>
-        <p id="prompt-text"></p>
-        <div class="prompt-actions">
-          <button class="link-btn" id="prompt-other">Otra pregunta ↻</button>
-        </div>
-      </div>
-
-      <div class="mood" role="radiogroup" aria-label="¿Cómo te sentiste?">
-        <span class="mood-label">¿Cómo te sentiste?</span>
-        <div class="mood-options">
-          <button data-mood="1" title="Muy difícil">😣</button>
-          <button data-mood="2" title="Difícil">😔</button>
-          <button data-mood="3" title="Normal">😐</button>
-          <button data-mood="4" title="Bien">🙂</button>
-          <button data-mood="5" title="Muy bien">😄</button>
-        </div>
-      </div>
-
-      <textarea id="entry-text" class="paper" placeholder="Querido diario… Escribe como le hablarías a alguien de confianza. Tres líneas bastan."></textarea>
-
-      <button class="btn idea-btn" id="btn-to-notion" type="button">💡 Enviar a Ideas de Notion</button>
-      <p class="muted small idea-hint">Selecciona un trozo del texto para enviar solo esa parte; si no seleccionas nada, se envía la entrada completa.</p>
-
-      <div class="gratitude">
-        <div class="section-label">🙏 Hoy agradezco</div>
-        <input class="grat" data-i="0" placeholder="Algo o alguien…">
-        <input class="grat" data-i="1" placeholder="Otra cosa…">
-        <input class="grat" data-i="2" placeholder="Una más…">
-      </div>
+      <div id="thread" class="thread"></div>
 
       <div class="entry-footer">
         <span class="muted small" id="save-status"></span>
-        <button class="link-btn danger" id="entry-delete" hidden>Borrar esta entrada</button>
+        <button class="link-btn danger" id="entry-delete" hidden>Borrar este día</button>
       </div>
-
-      <div id="on-this-day" class="memory" hidden></div>
     </section>
 
     <!-- Calendario -->
@@ -145,7 +114,7 @@
       <div class="cal-head"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="cal-grid" id="cal-grid"></div>
 
-      <input type="search" id="search" class="search" placeholder="🔎 Buscar en tu diario…">
+      <input type="search" id="search" class="search" placeholder="Buscar en tu diario…">
       <div id="entry-list" class="entry-list"></div>
     </section>
 
@@ -165,7 +134,7 @@
     <!-- Ajustes -->
     <section id="view-settings" class="view" hidden>
       <div class="card stack">
-        <h3>☁️ Sincronización</h3>
+        <h3>Sincronización</h3>
         <p class="muted small">Guarda una copia <b>cifrada</b> en tu repositorio privado de GitHub para usar el diario en el celular y el computador.</p>
         <label>Usuario de GitHub <input id="set-owner" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="tu-usuario"></label>
         <label>Repositorio privado <input id="set-repo" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="mi-diario-datos"></label>
@@ -178,7 +147,7 @@
       </div>
 
       <div class="card stack">
-        <h3>⏰ Recordatorio diario</h3>
+        <h3>Recordatorio diario</h3>
         <p class="muted small">Descarga un evento que se repite cada día y ábrelo para agregarlo a tu calendario. Te avisará a la hora elegida.</p>
         <div class="row">
           <input type="time" id="reminder-time" value="21:30" aria-label="Hora del recordatorio">
@@ -187,7 +156,7 @@
       </div>
 
       <div class="card stack">
-        <h3>💡 Ideas de Notion</h3>
+        <h3>Ideas de Notion</h3>
         <p class="muted small">En el celular, el botón abre el menú Compartir: elige <b>Notion</b> y luego <b>Ideas sueltas</b>. En el computador, se copia el texto y se abre este enlace para que lo pegues.</p>
         <label>Enlace de tu base "Ideas sueltas"
           <input id="notion-url" type="url" autocapitalize="off" spellcheck="false" placeholder="https://www.notion.so/…">
@@ -196,7 +165,7 @@
       </div>
 
       <div class="card stack">
-        <h3>🔐 Seguridad</h3>
+        <h3>Seguridad</h3>
         <label>Bloquear automáticamente después de
           <select id="autolock">
             <option value="1">1 minuto sin uso</option>
@@ -208,7 +177,7 @@
       </div>
 
       <div class="card stack">
-        <h3>💾 Respaldo</h3>
+        <h3>Respaldo</h3>
         <div class="row wrap">
           <button class="btn" id="btn-export-enc">Descargar respaldo cifrado</button>
           <label class="btn file-btn">Restaurar respaldo<input type="file" id="import-file" accept=".json,application/json" hidden></label>
@@ -218,7 +187,7 @@
       </div>
 
       <div class="card stack">
-        <h3>⚠️ Este dispositivo</h3>
+        <h3>Este dispositivo</h3>
         <button class="btn danger" id="btn-wipe">Quitar el diario de este dispositivo</button>
         <p class="muted small">Borra la copia local. Si tienes sincronización, el diario sigue a salvo en GitHub.</p>
       </div>
@@ -226,11 +195,24 @@
     </section>
   </main>
 
+  <form id="composer" class="composer" autocomplete="off">
+    <div class="editing-bar" id="editing-bar" hidden>
+      <span>Editando mensaje</span>
+      <button type="button" class="link-btn" id="edit-cancel">Cancelar</button>
+    </div>
+    <div class="composer-row">
+      <textarea id="entry-text" rows="1" placeholder="Escríbete como a alguien de confianza…" aria-label="Escribir mensaje"></textarea>
+      <button class="send" type="submit" id="btn-send" aria-label="Enviar">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M5 12h13M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </form>
+
   <nav class="tabbar">
-    <button data-view="write" class="active"><span>✍️</span>Escribir</button>
-    <button data-view="calendar"><span>📅</span>Calendario</button>
-    <button data-view="mood"><span>🌤️</span>Ánimo</button>
-    <button data-view="settings"><span>⚙️</span>Ajustes</button>
+    <button data-view="write" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Conversar</button>
+    <button data-view="calendar"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M9 3v4M15 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Calendario</button>
+    <button data-view="mood"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18l5-6 4 3 7-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Ánimo</button>
+    <button data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="10" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Ajustes</button>
   </nav>
 </div>
 

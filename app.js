@@ -7,7 +7,6 @@
 
   const LS_VAULT = 'miDiario.vault.v1';
   const LS_SET = 'miDiario.settings.v1';
-  const MOOD_EMOJI = { 1: '😣', 2: '😔', 3: '😐', 4: '🙂', 5: '😄' };
 
   let vault = null;        // bóveda cifrada (se guarda en el dispositivo)
   let key = null;          // llave en memoria, solo mientras está desbloqueado
@@ -59,7 +58,7 @@
   }
   function fmtShort(id) { return C.parseDayId(id).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' }); }
   const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  function greeting() { const h = new Date().getHours(); return h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches'; }
+  function greeting() { const h = new Date().getHours(); return h < 5 ? 'Buenas noches' : h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches'; }
   async function busy(btn, fn) { if (btn) btn.disabled = true; try { return await fn(); } finally { if (btn) btn.disabled = false; } }
 
   /* ---------- Inicio ---------- */
@@ -160,8 +159,8 @@
     if (!key) return;
     await flushSave();
     key = null; entries = {};
-    $('#entry-text').value = ''; $$('.grat').forEach((i) => { i.value = ''; });
-    $('#entry-list').textContent = ''; $('#grat-list').textContent = ''; $('#on-this-day').hidden = true;
+    $('#entry-text').value = ''; msgs = []; grat = ['', '', '']; mood = 0; thread.textContent = '';
+    $('#entry-list').textContent = ''; $('#grat-list').textContent = '';
     showLock();
   }
   $('#btn-lock').addEventListener('click', lock);
@@ -181,50 +180,213 @@
   function switchView(name) {
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + name; });
     $$('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    $('#composer').hidden = name !== 'write';
+    document.body.classList.toggle('chat-mode', name === 'write');
     if (name === 'calendar') renderCalendar();
     if (name === 'mood') renderMood();
     if (name === 'settings') renderSettings();
-    window.scrollTo(0, 0);
+    if (name === 'write') scrollThread(false); else window.scrollTo(0, 0);
   }
   $$('.tabbar button').forEach((b) => b.addEventListener('click', async () => {
     await flushSave(); switchView(b.dataset.view);
   }));
 
-  /* ---------- Escribir ---------- */
+  /* ---------- Conversar (escribir) ---------- */
+  // Estado del día abierto. Cada mensaje: { id, at, text }. "text" de la entrada
+  // se sigue guardando (mensajes unidos) para búsqueda, exportación y recuerdos.
   let currentPrompt = '';
+  let msgs = [], mood = 0, grat = ['', '', ''];
+  let editingId = null, openMsgId = null;
+  const thread = $('#thread');
+  const composer = $('#entry-text');
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const fmtTime = (iso) => new Date(iso).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+
+  function messagesOf(e) {
+    if (!e) return [];
+    if (Array.isArray(e.messages)) return e.messages.map((m) => Object.assign({}, m));
+    return (e.text || '').split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean)
+      .map((t) => ({ id: uid(), at: null, text: t }));
+  }
+
   function loadDay(id) {
-    current = id; promptOffset = 0;
+    current = id; promptOffset = 0; editingId = null; openMsgId = null;
     const e = entries[id];
-    const date = C.parseDayId(id);
     const isToday = id === C.dayId(new Date());
     $('#day-title').textContent = (isToday ? 'Hoy · ' : '') + fmtLong(id);
     $('#day-input').value = id;
-    currentPrompt = (e && e.prompt) || C.promptFor(date, 0);
-    $('#prompt-text').textContent = currentPrompt;
-    setMood(e ? e.mood : 0);
-    $('#entry-text').value = e ? e.text || '' : '';
-    $$('.grat').forEach((inp) => { inp.value = (e && e.gratitude && e.gratitude[+inp.dataset.i]) || ''; });
+    currentPrompt = (e && e.prompt) || C.promptFor(C.parseDayId(id), 0);
+    msgs = messagesOf(e);
+    mood = e ? e.mood || 0 : 0;
+    grat = [0, 1, 2].map((i) => (e && e.gratitude && e.gratitude[i]) || '');
+    composer.value = ''; autosize(); setEditing(null);
     $('#entry-delete').hidden = !e;
-    $('#save-status').textContent = e ? 'Guardado · cifrado 🔐' : '';
-    renderOnThisDay(id);
+    $('#save-status').textContent = e ? 'Guardado y cifrado' : '';
+    renderThread();
+    scrollThread(false);
   }
-  function setMood(m) { $$('.mood-options button').forEach((b) => b.classList.toggle('sel', +b.dataset.mood === m)); }
-  function currentMood() { const s = $('.mood-options button.sel'); return s ? +s.dataset.mood : 0; }
+
+  function bubble(who, extra) {
+    const b = el('div', 'msg ' + who + (extra ? ' ' + extra : ''));
+    return b;
+  }
+
+  function renderThread() {
+    thread.textContent = '';
+    const isToday = current === C.dayId(new Date());
+
+    // Recuerdo de otros años
+    const md = current.slice(5);
+    const past = Object.keys(entries).filter((k) => k.slice(5) === md && k < current).sort().reverse();
+    if (past.length) {
+      const k = past[0], years = +current.slice(0, 4) - +k.slice(0, 4);
+      const t = entries[k].text || '';
+      const b = bubble('them', 'memory');
+      b.appendChild(el('div', 'msg-label', 'Un día como hoy, hace ' + years + (years === 1 ? ' año' : ' años')));
+      b.appendChild(el('p', 'quote', t.slice(0, 280) + (t.length > 280 ? '…' : '')));
+      const go = el('button', 'link-btn', 'Leer ese día');
+      go.addEventListener('click', () => loadDay(k));
+      b.appendChild(go);
+      thread.appendChild(b);
+    }
+
+    // Pregunta del día
+    const q = bubble('them', 'prompt');
+    if (isToday && !msgs.length) q.appendChild(el('p', 'hello', greeting() + '. ¿Cómo va todo?'));
+    q.appendChild(el('p', null, currentPrompt));
+    thread.appendChild(q);
+    const chips = el('div', 'chips them-chips');
+    const other = el('button', 'chip', 'Otra pregunta');
+    other.type = 'button';
+    other.addEventListener('click', () => {
+      promptOffset++;
+      currentPrompt = C.promptFor(C.parseDayId(current), promptOffset);
+      if (entries[current]) scheduleSave();
+      renderThread();
+    });
+    chips.appendChild(other);
+    thread.appendChild(chips);
+
+    // Tus mensajes
+    msgs.forEach((m) => {
+      const b = bubble('me' + (m.id === editingId ? ' editing' : ''));
+      b.tabIndex = 0;
+      b.setAttribute('role', 'button');
+      b.setAttribute('aria-expanded', String(openMsgId === m.id));
+      b.appendChild(el('p', null, m.text));
+      if (m.at) b.appendChild(el('span', 'time', fmtTime(m.at)));
+      const toggle = () => { openMsgId = openMsgId === m.id ? null : m.id; renderThread(); };
+      b.addEventListener('click', toggle);
+      b.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } });
+      thread.appendChild(b);
+      if (openMsgId === m.id) thread.appendChild(msgActions(m));
+    });
+
+    // Cierre del día: ánimo y gratitud (aparecen cuando ya escribiste algo)
+    if (msgs.length || mood || grat.some(Boolean)) {
+      const mb = bubble('them');
+      mb.appendChild(el('p', null, '¿Cómo te sentiste hoy?'));
+      thread.appendChild(mb);
+      const mr = el('div', 'chips them-chips');
+      mr.setAttribute('role', 'radiogroup'); mr.setAttribute('aria-label', '¿Cómo te sentiste hoy?');
+      [1, 2, 3, 4, 5].forEach((n) => {
+        const c = el('button', 'chip mood-chip' + (mood === n ? ' sel' : ''));
+        c.type = 'button';
+        c.setAttribute('role', 'radio'); c.setAttribute('aria-checked', String(mood === n));
+        c.appendChild(el('span', 'dot m' + n));
+        c.appendChild(document.createTextNode(C.MOODS[n]));
+        c.addEventListener('click', () => {
+          mood = mood === n ? 0 : n;
+          $$('.mood-chip').forEach((x, i) => { x.classList.toggle('sel', mood === i + 1); x.setAttribute('aria-checked', String(mood === i + 1)); });
+          scheduleSave();
+        });
+        mr.appendChild(c);
+      });
+      thread.appendChild(mr);
+
+      const gb = bubble('them');
+      gb.appendChild(el('p', null, '¿Qué agradeces hoy?'));
+      thread.appendChild(gb);
+      const gw = el('div', 'grat-wrap');
+      ['Algo o alguien…', 'Otra cosa…', 'Una más…'].forEach((ph, i) => {
+        const inp = el('input', 'grat');
+        inp.placeholder = ph; inp.value = grat[i];
+        inp.setAttribute('aria-label', 'Agradecimiento ' + (i + 1));
+        inp.addEventListener('input', () => { grat[i] = inp.value; scheduleSave(); });
+        gw.appendChild(inp);
+      });
+      thread.appendChild(gw);
+    }
+  }
+
+  function msgActions(m) {
+    const row = el('div', 'msg-actions');
+    const mk = (label, cls, fn) => { const b = el('button', 'chip' + (cls ? ' ' + cls : ''), label); b.type = 'button'; b.addEventListener('click', fn); row.appendChild(b); };
+    mk('Editar', '', () => {
+      setEditing(m.id); composer.value = m.text; autosize(); openMsgId = null; renderThread(); composer.focus();
+    });
+    mk('Enviar a Notion', '', () => sendToNotion(m.text));
+    mk('Borrar', 'danger', () => {
+      if (!confirm('¿Borrar este mensaje?')) return;
+      msgs = msgs.filter((x) => x.id !== m.id);
+      if (editingId === m.id) { setEditing(null); composer.value = ''; autosize(); }
+      openMsgId = null; renderThread(); scheduleSave();
+    });
+    return row;
+  }
+
+  function setEditing(id) {
+    editingId = id;
+    $('#editing-bar').hidden = !id;
+  }
+  $('#edit-cancel').addEventListener('click', () => {
+    setEditing(null); composer.value = ''; autosize(); renderThread();
+  });
+
+  function autosize() {
+    composer.style.height = 'auto';
+    composer.style.height = Math.min(composer.scrollHeight, Math.round(window.innerHeight * 0.35)) + 'px';
+  }
+  function scrollThread(smooth) {
+    requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: smooth ? 'smooth' : 'auto' }));
+  }
+
+  function send() {
+    const text = composer.value.trim();
+    if (!text) return;
+    if (editingId) {
+      const m = msgs.find((x) => x.id === editingId);
+      if (m) m.text = text;
+      setEditing(null);
+    } else {
+      msgs.push({ id: uid(), at: new Date().toISOString(), text });
+    }
+    composer.value = ''; autosize();
+    openMsgId = null;
+    renderThread(); scrollThread(true);
+    scheduleSave();
+  }
+  $('#composer').addEventListener('submit', (ev) => { ev.preventDefault(); send(); composer.focus(); });
+  composer.addEventListener('input', autosize);
+  composer.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); send(); }
+  });
 
   function collect() {
     return {
       id: current,
       prompt: currentPrompt,
-      mood: currentMood(),
-      text: $('#entry-text').value,
-      gratitude: $$('.grat').map((i) => i.value.trim()),
+      mood,
+      messages: msgs,
+      text: msgs.map((m) => m.text).join('\n\n'),
+      gratitude: grat.map((g) => g.trim()),
       updated: new Date().toISOString()
     };
   }
   function isEmpty(e) { return !e.text.trim() && !e.mood && !e.gratitude.some(Boolean); }
 
   function scheduleSave() {
-    $('#save-status').textContent = 'Escribiendo…';
+    $('#save-status').textContent = 'Guardando…';
     clearTimeout(saveTimer);
     saveTimer = setTimeout(doSave, 700);
   }
@@ -238,7 +400,7 @@
       await C.putEntry(vault, key, e);
       persist();
       if (e.id === current) {
-        $('#save-status').textContent = 'Guardado · cifrado 🔐';
+        $('#save-status').textContent = 'Guardado y cifrado';
         $('#entry-delete').hidden = false;
       }
       scheduleSync();
@@ -250,17 +412,6 @@
     else if (savePromise) await savePromise;
   }
 
-  $('#entry-text').addEventListener('input', scheduleSave);
-  $$('.grat').forEach((i) => i.addEventListener('input', scheduleSave));
-  $$('.mood-options button').forEach((b) => b.addEventListener('click', () => {
-    setMood(currentMood() === +b.dataset.mood ? 0 : +b.dataset.mood); scheduleSave();
-  }));
-  $('#prompt-other').addEventListener('click', () => {
-    promptOffset++;
-    currentPrompt = C.promptFor(C.parseDayId(current), promptOffset);
-    $('#prompt-text').textContent = currentPrompt;
-    if (entries[current]) scheduleSave();
-  });
   async function goDay(delta) {
     await flushSave();
     const d = C.parseDayId(current); d.setDate(d.getDate() + delta); loadDay(C.dayId(d));
@@ -269,26 +420,11 @@
   $('#day-next').addEventListener('click', () => goDay(1));
   $('#day-input').addEventListener('change', async (ev) => { if (ev.target.value) { await flushSave(); loadDay(ev.target.value); } });
   $('#entry-delete').addEventListener('click', async () => {
-    if (!confirm('¿Borrar la entrada de ' + fmtLong(current) + '? No se puede deshacer.')) return;
+    if (!confirm('¿Borrar todo lo escrito el ' + fmtLong(current) + '? No se puede deshacer.')) return;
     clearTimeout(saveTimer); saveTimer = null;
     C.deleteEntry(vault, current); delete entries[current];
-    persist(); loadDay(current); scheduleSync(); toast('Entrada borrada.');
+    persist(); loadDay(current); scheduleSync(); toast('Día borrado.');
   });
-
-  function renderOnThisDay(id) {
-    const box = $('#on-this-day'); box.textContent = '';
-    const md = id.slice(5);
-    const past = Object.keys(entries).filter((k) => k.slice(5) === md && k < id).sort().reverse();
-    if (!past.length) { box.hidden = true; return; }
-    const k = past[0];
-    const years = +id.slice(0, 4) - +k.slice(0, 4);
-    box.appendChild(el('div', 'when', 'Un día como hoy, hace ' + years + (years === 1 ? ' año' : ' años')));
-    box.appendChild(el('p', null, (entries[k].text || '').slice(0, 280) + ((entries[k].text || '').length > 280 ? '…' : '')));
-    const b = el('button', 'link-btn', 'Leer completa →');
-    b.addEventListener('click', () => loadDay(k));
-    box.appendChild(b);
-    box.hidden = false;
-  }
 
   /* ---------- Calendario y búsqueda ---------- */
   function renderCalendar() {
@@ -305,7 +441,7 @@
       const e = entries[id];
       const b = el('button', 'cal-day' + (e ? ' has' : '') + (id === today ? ' today' : ''));
       b.appendChild(el('span', null, String(d)));
-      if (e) b.appendChild(el('span', 'dot', e.mood ? MOOD_EMOJI[e.mood] : '•'));
+      if (e) b.appendChild(el('span', 'dot' + (e.mood ? ' m' + e.mood : '')));
       b.setAttribute('aria-label', fmtLong(id) + (e ? ', con entrada' : ''));
       b.addEventListener('click', () => { switchView('write'); loadDay(id); });
       grid.appendChild(b);
@@ -330,7 +466,7 @@
     ids.forEach((id) => {
       const e = entries[id];
       const b = el('button', 'entry-item');
-      b.appendChild(el('div', 'when', (e.mood ? MOOD_EMOJI[e.mood] + ' ' : '') + fmtShort(id)));
+      const w = el('div', 'when'); if (e.mood) w.appendChild(el('span', 'dot m' + e.mood)); w.appendChild(document.createTextNode(fmtShort(id) + (e.mood ? ' · ' + C.MOODS[e.mood] : ''))); b.appendChild(w);
       b.appendChild(el('p', null, (e.text || '').trim() || (e.gratitude || []).filter(Boolean).join(' · ') || '(sin texto)'));
       b.addEventListener('click', () => { switchView('write'); loadDay(id); });
       list.appendChild(b);
@@ -349,9 +485,9 @@
     for (let i = 29; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); days.push(C.dayId(d)); }
     const moods = days.map((id) => (entries[id] && entries[id].mood) || 0);
     const rated = moods.filter(Boolean);
-    $('#st-avg').textContent = rated.length ? MOOD_EMOJI[Math.round(rated.reduce((a, b) => a + b, 0) / rated.length)] : '–';
+    $('#st-avg').textContent = rated.length ? C.MOODS[Math.round(rated.reduce((a, b) => a + b, 0) / rated.length)] : '–';
 
-    const W = 330, H = 150, pad = 18, bw = (W - pad) / 30;
+    const W = 330, H = 150, pad = 56, bw = (W - pad) / 30;
     const ns = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(ns, 'svg');
     svg.setAttribute('viewBox', `0 0 ${W} ${H + 22}`);
@@ -364,8 +500,8 @@
       ln.setAttribute('stroke', 'var(--line)'); ln.setAttribute('stroke-dasharray', '2 3');
       svg.appendChild(ln);
       const tx = document.createElementNS(ns, 'text');
-      tx.setAttribute('x', 0); tx.setAttribute('y', y + 4); tx.setAttribute('font-size', '10');
-      tx.textContent = MOOD_EMOJI[lvl]; svg.appendChild(tx);
+      tx.setAttribute('x', 0); tx.setAttribute('y', y + 4); tx.setAttribute('font-size', '10'); tx.setAttribute('fill', 'var(--muted)');
+      tx.textContent = C.MOODS[lvl]; svg.appendChild(tx);
     });
     moods.forEach((m, i) => {
       const x = pad + i * bw + 1.5, w = bw - 3;
@@ -401,7 +537,8 @@
   function updateSyncBadge(state) {
     const b = $('#sync-status');
     if (!syncConfigured()) { b.textContent = ''; return; }
-    b.textContent = state === 'busy' ? '☁️ …' : state === 'error' ? '☁️ ⚠️' : '☁️ ✓';
+    b.textContent = state === 'busy' ? 'Sincronizando…' : state === 'error' ? 'Sin sincronizar' : 'Sincronizado';
+    b.dataset.state = state || 'ok';
   }
   function scheduleSync() {
     if (!syncConfigured()) return;
@@ -434,7 +571,7 @@
         if (!$('#view-calendar').hidden) renderCalendar();
         if (!$('#view-mood').hidden) renderMood();
       }
-      if (!silent) toast('Sincronizado ✓');
+      if (!silent) toast('Sincronizado');
       if (!$('#view-settings').hidden) renderSettings();
     } catch (e) {
       updateSyncBadge('error');
@@ -451,7 +588,7 @@
     $('#set-owner').value = settings.owner || '';
     $('#set-repo').value = settings.repo || '';
     $('#set-token').value = '';
-    $('#set-token').placeholder = settings.tokenBox ? 'Guardado 🔐 (déjalo vacío para mantenerlo)' : 'github_pat_…';
+    $('#set-token').placeholder = settings.tokenBox ? 'Guardado (déjalo vacío para mantenerlo)' : 'github_pat_…';
     $('#autolock').value = String(settings.autolock);
     $('#reminder-time').value = settings.reminder || '21:30';
     $('#notion-url').value = settings.notionUrl || '';
@@ -475,37 +612,23 @@
   $('#notion-url').addEventListener('change', (ev) => { settings.notionUrl = ev.target.value.trim(); saveSettings(); });
 
   /* ---------- Enviar a Ideas de Notion ---------- */
-  let lastSel = { start: 0, end: 0 };
-  const ta = $('#entry-text');
-  const rememberSel = () => { lastSel = { start: ta.selectionStart, end: ta.selectionEnd }; };
-  ['select', 'keyup', 'mouseup', 'touchend', 'blur'].forEach((t) => ta.addEventListener(t, rememberSel));
-  document.addEventListener('selectionchange', () => { if (document.activeElement === ta) rememberSel(); });
-  ta.addEventListener('input', () => { lastSel = { start: 0, end: 0 }; });
-
-  function ideaPayload() {
-    const full = ta.value;
-    const sel = lastSel.end > lastSel.start ? full.slice(lastSel.start, lastSel.end).trim() : '';
-    const body = sel || full.trim();
-    if (!body) return null;
+  async function sendToNotion(body) {
+    body = (body || '').trim();
+    if (!body) return;
     const firstLine = body.split('\n').find((l) => l.trim()) || body;
     const title = firstLine.length > 70 ? firstLine.slice(0, 67).trim() + '…' : firstLine.trim();
     const text = body + '\n\n— Desde mi diario, ' + fmtLong(current);
-    return { title, text };
-  }
-  $('#btn-to-notion').addEventListener('click', async () => {
-    const p = ideaPayload();
-    if (!p) { toast('Escribe o selecciona algo primero.'); return; }
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
     if (isMobile && navigator.share) {
-      try { await navigator.share({ title: p.title, text: p.text }); return; }
+      try { await navigator.share({ title, text }); return; }
       catch (e) { if (e.name === 'AbortError') return; /* si falla, se usa el plan B */ }
     }
     let copied = false;
-    try { await navigator.clipboard.writeText(p.text); copied = true; } catch (e) {}
+    try { await navigator.clipboard.writeText(text); copied = true; } catch (e) {}
     if (settings.notionUrl) window.open(settings.notionUrl, '_blank', 'noopener');
-    if (copied) toast(settings.notionUrl ? 'Copiado ✓ Pégalo como nueva idea en Notion.' : 'Copiado ✓ Agrega el enlace de tu base en Ajustes para abrirla directo.', 4500);
+    if (copied) toast(settings.notionUrl ? 'Copiado. Pégalo como nueva idea en Notion.' : 'Copiado. Agrega el enlace de tu base en Ajustes para abrirla directo.', 4500);
     else toast('No pude copiar el texto. Selecciónalo y cópialo a mano.', 4500);
-  });
+  }
 
   $('#autolock').addEventListener('change', (ev) => { settings.autolock = +ev.target.value; saveSettings(); });
   $('#btn-reminder').addEventListener('click', () => {
