@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   const C = window.DiarioCore;
+  const AI = window.DiarioAI;
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
 
@@ -29,7 +30,7 @@
     catch (e) { toast('No pude guardar en este dispositivo (¿sin espacio?).'); }
   }
   function loadSettings() {
-    const def = { owner: '', repo: '', path: 'diario.json', tokenBox: null, lastSync: 0, autolock: 5, reminder: '21:30', notionUrl: '' };
+    const def = { owner: '', repo: '', path: 'diario.json', tokenBox: null, lastSync: 0, autolock: 5, reminder: '21:30', notionUrl: '', aiOn: false, aiModel: 'recomendado' };
     try { return Object.assign(def, JSON.parse(localStorage.getItem(LS_SET)) || {}); } catch (e) { return def; }
   }
   function saveSettings() { try { localStorage.setItem(LS_SET, JSON.stringify(settings)); } catch (e) {} }
@@ -197,6 +198,7 @@
   let currentPrompt = '';
   let msgs = [], mood = 0, grat = ['', '', ''];
   let editingId = null, openMsgId = null;
+  let asking = null;   // pregunta de seguimiento en curso: { day, pct, text }
   const thread = $('#thread');
   const composer = $('#entry-text');
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -210,7 +212,7 @@
   }
 
   function loadDay(id) {
-    current = id; promptOffset = 0; editingId = null; openMsgId = null;
+    current = id; promptOffset = 0; editingId = null; openMsgId = null; asking = null;
     const e = entries[id];
     const isToday = id === C.dayId(new Date());
     $('#day-title').textContent = (isToday ? 'Hoy · ' : '') + fmtLong(id);
@@ -269,6 +271,18 @@
 
     // Tus mensajes
     msgs.forEach((m) => {
+      if (m.from === 'ia') {
+        const q = bubble('them', 'ia');
+        q.tabIndex = 0; q.setAttribute('role', 'button'); q.setAttribute('aria-expanded', String(openMsgId === m.id));
+        q.appendChild(el('div', 'msg-label', m.kind === 'ayuda' ? 'Importante' : 'Pregunta de seguimiento'));
+        q.appendChild(el('p', null, m.text));
+        const tg = () => { openMsgId = openMsgId === m.id ? null : m.id; renderThread(); };
+        q.addEventListener('click', tg);
+        q.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tg(); } });
+        thread.appendChild(q);
+        if (openMsgId === m.id) thread.appendChild(msgActions(m));
+        return;
+      }
       const b = bubble('me' + (m.id === editingId ? ' editing' : ''));
       b.tabIndex = 0;
       b.setAttribute('role', 'button');
@@ -281,6 +295,22 @@
       thread.appendChild(b);
       if (openMsgId === m.id) thread.appendChild(msgActions(m));
     });
+
+    // Pregunta de seguimiento (IA en el dispositivo)
+    if (asking && asking.day === current) {
+      const t = bubble('them', 'thinking');
+      t.id = 'ai-thinking';
+      t.appendChild(el('p', null, asking.text || (asking.pct != null && asking.pct < 100 ? 'Preparando la IA en tu celular…' : 'Pensando una pregunta…')));
+      if (asking.pct != null && asking.pct < 100) { const pr = el('div', 'progress'); const bar = el('span'); bar.style.width = asking.pct + '%'; pr.appendChild(bar); t.appendChild(pr); }
+      thread.appendChild(t);
+    } else if (settings.aiOn && msgs.length && msgs[msgs.length - 1].from !== 'ia') {
+      const row = el('div', 'chips me-chips');
+      const c = el('button', 'chip ask', 'Pregúntame más');
+      c.type = 'button';
+      c.addEventListener('click', askMore);
+      row.appendChild(c);
+      thread.appendChild(row);
+    }
 
     // Cierre del día: ánimo y gratitud (aparecen cuando ya escribiste algo)
     if (msgs.length || mood || grat.some(Boolean)) {
@@ -322,6 +352,11 @@
   function msgActions(m) {
     const row = el('div', 'msg-actions');
     const mk = (label, cls, fn) => { const b = el('button', 'chip' + (cls ? ' ' + cls : ''), label); b.type = 'button'; b.addEventListener('click', fn); row.appendChild(b); };
+    if (m.from === 'ia') {
+      row.classList.add('them-chips'); row.style.alignSelf = 'flex-start'; row.style.justifyContent = 'flex-start';
+      mk('Quitar pregunta', 'danger', () => { msgs = msgs.filter((x) => x.id !== m.id); openMsgId = null; renderThread(); scheduleSave(); });
+      return row;
+    }
     mk('Editar', '', () => {
       setEditing(m.id); composer.value = m.text; autosize(); openMsgId = null; renderThread(); composer.focus();
     });
@@ -372,13 +407,52 @@
     if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); send(); }
   });
 
+  async function askMore() {
+    if (asking) return;
+    const day = current;
+    asking = { day, pct: null, text: '' };
+    renderThread(); scrollThread(true);
+    const update = () => {
+      const t = $('#ai-thinking'); if (!t || current !== day) return;
+      const p = t.querySelector('p');
+      if (asking.text) p.textContent = asking.text;
+      else p.textContent = asking.pct != null && asking.pct < 100 ? 'Preparando la IA en tu celular… ' + asking.pct + '%' : 'Pensando una pregunta…';
+      let pr = t.querySelector('.progress');
+      if (asking.pct != null && asking.pct < 100 && !asking.text) {
+        if (!pr) { pr = el('div', 'progress'); pr.appendChild(el('span')); t.appendChild(pr); }
+        pr.firstChild.style.width = asking.pct + '%';
+      } else if (pr) pr.remove();
+    };
+    try {
+      const res = await AI.ask(
+        { prompt: currentPrompt, messages: msgs.map((m) => ({ from: m.from, text: m.text })) },
+        settings.aiModel,
+        (pct) => { if (asking) { asking.pct = pct; update(); } },
+        (partial) => { if (asking) { asking.text = partial.replace(/\s+/g, ' ').trim(); update(); } }
+      );
+      if (current !== day) return;
+      let text = res.text;
+      if (!text) text = C.promptFor(C.parseDayId(day), promptOffset + 1 + msgs.length);
+      const msg = { id: uid(), at: new Date().toISOString(), text, from: 'ia' };
+      if (res.risk) msg.kind = 'ayuda';
+      msgs.push(msg);
+      asking = null;
+      renderThread(); scrollThread(true);
+      scheduleSave();
+    } catch (e) {
+      asking = null;
+      if (current === day) renderThread();
+      toast(e.message || 'No pude hacer la pregunta.', 6000);
+    }
+  }
+
   function collect() {
     return {
       id: current,
       prompt: currentPrompt,
       mood,
       messages: msgs,
-      text: msgs.map((m) => m.text).join('\n\n'),
+      text: msgs.filter((m) => m.from !== 'ia').map((m) => m.text).join('\n\n'),
       gratitude: grat.map((g) => g.trim()),
       updated: new Date().toISOString()
     };
@@ -592,6 +666,7 @@
     $('#autolock').value = String(settings.autolock);
     $('#reminder-time').value = settings.reminder || '21:30';
     $('#notion-url').value = settings.notionUrl || '';
+    renderAISettings();
     $('#sync-info').textContent = syncConfigured()
       ? (settings.lastSync ? 'Última sincronización: ' + new Date(settings.lastSync).toLocaleString('es-CL') : 'Aún sin sincronizar.')
       : 'Sin configurar: el diario solo vive en este dispositivo.';
@@ -609,6 +684,42 @@
     if (!syncConfigured()) { toast('Primero configura la sincronización.'); return; }
     await flushSave(); await syncNow(false);
   }));
+  /* --- Preguntas de seguimiento --- */
+  async function renderAISettings() {
+    $('#ai-on').checked = !!settings.aiOn;
+    $('#ai-model').value = settings.aiModel || 'recomendado';
+    const st = $('#ai-status');
+    const s = await AI.support();
+    if (!s.ok) {
+      st.textContent = s.why;
+      $('#ai-download').disabled = true; $('#ai-on').disabled = true;
+      return;
+    }
+    $('#ai-download').disabled = false; $('#ai-on').disabled = false;
+    const have = await AI.isDownloaded(settings.aiModel);
+    st.textContent = have ? 'Modelo descargado en este dispositivo.' : 'El modelo aún no está descargado en este dispositivo.';
+    $('#ai-download').textContent = have ? 'Probar que funciona' : 'Descargar ahora';
+  }
+  $('#ai-on').addEventListener('change', (ev) => {
+    settings.aiOn = ev.target.checked; saveSettings();
+    toast(settings.aiOn ? 'Listo: verás "Pregúntame más" después de tus mensajes.' : 'Preguntas de seguimiento desactivadas.');
+  });
+  $('#ai-model').addEventListener('change', (ev) => { settings.aiModel = ev.target.value; saveSettings(); renderAISettings(); });
+  $('#ai-download').addEventListener('click', (ev) => busy(ev.currentTarget, async () => {
+    const bar = $('#ai-progress'), st = $('#ai-status');
+    bar.hidden = false; bar.firstElementChild.style.width = '0%';
+    st.textContent = 'Descargando… no cierres la app.';
+    try {
+      await AI.load(settings.aiModel, (pct) => { bar.firstElementChild.style.width = pct + '%'; st.textContent = 'Descargando y preparando… ' + pct + '%'; });
+      bar.hidden = true;
+      st.textContent = 'Listo. El modelo quedó en este dispositivo.';
+      if (!settings.aiOn) { settings.aiOn = true; saveSettings(); $('#ai-on').checked = true; }
+      $('#ai-download').textContent = 'Probar que funciona';
+    } catch (e) {
+      bar.hidden = true; st.textContent = e.message;
+    }
+  }));
+
   $('#notion-url').addEventListener('change', (ev) => { settings.notionUrl = ev.target.value.trim(); saveSettings(); });
 
   /* ---------- Enviar a Ideas de Notion ---------- */

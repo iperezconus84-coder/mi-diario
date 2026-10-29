@@ -155,6 +155,25 @@
         </div>
       </div>
 
+      <div class="card stack" id="ai-card">
+        <h3>Preguntas de seguimiento</h3>
+        <p class="muted small">Activa un botón <b>Pregúntame más</b> en la conversación: una IA pequeña lee lo que escribiste y te hace una pregunta para profundizar. Funciona <b>dentro de este dispositivo</b>: lo que escribes no se envía a internet.</p>
+        <label class="switch-row"><input type="checkbox" id="ai-on"> <span>Activar preguntas de seguimiento</span></label>
+        <label>Modelo
+          <select id="ai-model">
+            <option value="recomendado">Recomendado (cerca de 1 GB)</option>
+            <option value="ligero">Ligero (unos 300 MB)</option>
+          </select>
+        </label>
+        <p class="muted small">El recomendado entiende mejor el español. Usa el ligero si tu celular es más modesto o se pone lento.</p>
+        <div class="row wrap">
+          <button class="btn" id="ai-download">Descargar ahora</button>
+        </div>
+        <div class="progress" id="ai-progress" hidden><span></span></div>
+        <p class="muted small" id="ai-status"></p>
+        <p class="muted small">Se descarga una sola vez (mejor con Wi-Fi) y queda guardado en el navegador. Es una ayuda para reflexionar: puede equivocarse y no reemplaza a una persona.</p>
+      </div>
+
       <div class="card stack">
         <h3>Ideas de Notion</h3>
         <p class="muted small">En el celular, el botón abre el menú Compartir: elige <b>Notion</b> y luego <b>Ideas sueltas</b>. En el computador, se copia el texto y se abre este enlace para que lo pegues.</p>
@@ -219,6 +238,7 @@
 <div id="toast" class="toast" role="status" hidden></div>
 
 <script src="core.js"></script>
+<script src="ai.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
