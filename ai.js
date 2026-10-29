@@ -1,9 +1,15 @@
-/* Mi Diario — preguntas de seguimiento con IA que corre en el celular (WebLLM).
+/* Mi Diario — preguntas de seguimiento con IA que corre en el celular.
+   Con aceleración gráfica usa WebLLM (más rápido). Si el celular no la ofrece,
+   usa wllama con el procesador normal y el modelo ligero (más lento, funciona en casi todos).
    El modelo se descarga una sola vez y queda guardado en el navegador.
    Lo que escribes nunca sale del dispositivo. */
 (function (root) {
   'use strict';
   const LIB = 'https://esm.run/@mlc-ai/web-llm@0.2.86';
+  const CPU_LIB = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.8.1/esm/index.js';
+  const CPU_WASM = 'https://cdn.jsdelivr.net/npm/@wllama/wllama@3.8.1/esm/wasm/wllama.wasm';
+  const CPU_MODEL = 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf';
+  const CPU_SIZE = 'unos 500 MB';
 
   const MODELS = {
     ligero: { name: 'Ligero', size: 'unos 300 MB', f16: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC', f32: 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC' },
@@ -23,22 +29,56 @@
   ].join(' ');
 
   let engine = null, loading = null, loadedId = null;
+  let cpu = null, cpuLoading = null;
 
+  // gpu: true → WebLLM con aceleración gráfica; gpu: false → modo procesador (wllama)
   async function support() {
-    if (!navigator.gpu) return { ok: false, why: 'Este navegador no tiene WebGPU. Usa Chrome actualizado en Android o en el computador.' };
+    const cpuOk = typeof WebAssembly === 'object' && typeof Worker === 'function';
+    const viaCPU = (why) => cpuOk
+      ? { ok: true, gpu: false, why }
+      : { ok: false, why: 'Este navegador no puede correr la IA. Usa Chrome actualizado.' };
+    if (!navigator.gpu) return viaCPU('Este navegador no tiene aceleración gráfica para la IA.');
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) return { ok: false, why: 'Tu dispositivo no ofrece aceleración gráfica para la IA.' };
-      return { ok: true, f16: adapter.features.has('shader-f16') };
+      if (!adapter) return viaCPU('Tu celular no ofrece aceleración gráfica para la IA.');
+      return { ok: true, gpu: true, f16: adapter.features.has('shader-f16') };
     } catch (e) {
-      return { ok: false, why: 'No pude acceder a la aceleración gráfica de este dispositivo.' };
+      return viaCPU('No pude acceder a la aceleración gráfica de este celular.');
     }
+  }
+
+  /* --- Modo procesador (wllama) --- */
+  async function cpuInstance() {
+    if (cpu) return cpu;
+    const lib = await import(CPU_LIB);
+    cpu = new lib.Wllama({ default: CPU_WASM }, { suppressNativeLog: true });
+    return cpu;
+  }
+  async function loadCPU(onProgress) {
+    const w = await cpuInstance();
+    if (w.isModelLoaded()) return w;
+    if (cpuLoading) return cpuLoading;
+    cpuLoading = (async () => {
+      await w.loadModelFromUrl(CPU_MODEL, {
+        n_ctx: 2048, n_gpu_layers: 0,
+        progressCallback: ({ loaded, total }) => { if (onProgress && total) onProgress(Math.min(99, Math.round((loaded / total) * 100)), ''); }
+      });
+      if (onProgress) onProgress(100, '');
+      return w;
+    })();
+    try { return await cpuLoading; }
+    catch (e) {
+      try { await w.exit(); } catch (x) {}
+      cpu = null;
+      throw new Error('No pude preparar la IA: ' + (e.message || e));
+    } finally { cpuLoading = null; }
   }
 
   async function load(modelKey, onProgress) {
     const m = MODELS[modelKey] || MODELS.recomendado;
     const s = await support();
     if (!s.ok) throw new Error(s.why);
+    if (!s.gpu) return { cpu: await loadCPU(onProgress) };
     const id = s.f16 ? m.f16 : m.f32;
     if (engine && loadedId === id) return engine;
     if (loading) return loading;
@@ -63,6 +103,11 @@
       const m = MODELS[modelKey] || MODELS.recomendado;
       const s = await support();
       if (!s.ok) return false;
+      if (!s.gpu) {
+        const w = await cpuInstance();
+        const name = await w.cacheManager.getNameFromURL(CPU_MODEL);
+        return (await w.cacheManager.getSize(name)) > 0;
+      }
       const lib = await import(LIB);
       return await lib.hasModelInCache(s.f16 ? m.f16 : m.f32);
     } catch (e) { return false; }
@@ -86,22 +131,24 @@
     const mine = context.messages.filter((m) => m.from !== 'ia');
     if (mine.slice(-3).some((m) => RISK.test(m.text))) return { risk: true, text: RISK_REPLY };
     const eng = await load(modelKey, onProgress);
+    const isCPU = !!(eng && eng.cpu);
     const recent = context.messages.slice(-8);
     const convo = [{ role: 'system', content: SYSTEM }];
     if (context.prompt) convo.push({ role: 'assistant', content: context.prompt });
     recent.forEach((m) => convo.push({ role: m.from === 'ia' ? 'assistant' : 'user', content: m.text }));
     try {
       let out = '';
-      const stream = await eng.chat.completions.create({ messages: convo, temperature: 0.7, max_tokens: 90, stream: true });
+      const req = { messages: convo, temperature: 0.7, max_tokens: 90, stream: true };
+      const stream = isCPU ? await eng.cpu.createChatCompletion(req) : await eng.chat.completions.create(req);
       for await (const chunk of stream) {
         const d = chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content;
         if (d) { out += d; if (onToken) onToken(out); }
       }
       return { risk: false, text: clean(out) };
     } finally {
-      try { await eng.resetChat(); } catch (e) {}
+      if (!isCPU) { try { await eng.resetChat(); } catch (e) {} }
     }
   }
 
-  root.DiarioAI = { MODELS, support, load, ask, isDownloaded, clean, RISK, RISK_REPLY };
+  root.DiarioAI = { MODELS, CPU_SIZE, support, load, ask, isDownloaded, clean, RISK, RISK_REPLY };
 })(window);

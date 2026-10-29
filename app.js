@@ -696,6 +696,9 @@
       return;
     }
     $('#ai-download').disabled = false; $('#ai-on').disabled = false;
+    $('#ai-model').disabled = !s.gpu;
+    $('#ai-cpu-note').hidden = s.gpu;
+    if (!s.gpu) $('#ai-cpu-note').textContent = s.why + ' Se usará el modo procesador con el modelo ligero (' + AI.CPU_SIZE + '): funciona igual de privado, pero cada pregunta puede tardar entre 10 y 40 segundos.';
     const have = await AI.isDownloaded(settings.aiModel);
     st.textContent = have ? 'Modelo descargado en este dispositivo.' : 'El modelo aún no está descargado en este dispositivo.';
     $('#ai-download').textContent = have ? 'Probar que funciona' : 'Descargar ahora';
